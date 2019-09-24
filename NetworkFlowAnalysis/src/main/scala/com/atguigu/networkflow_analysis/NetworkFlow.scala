@@ -4,7 +4,7 @@ import java.sql.Timestamp
 import java.text.SimpleDateFormat
 
 import org.apache.flink.api.common.functions.AggregateFunction
-import org.apache.flink.api.common.state.{ListState, ListStateDescriptor}
+import org.apache.flink.api.common.state.{ListState, ListStateDescriptor, MapState, MapStateDescriptor}
 import org.apache.flink.streaming.api.TimeCharacteristic
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction
 import org.apache.flink.streaming.api.functions.timestamps.BoundedOutOfOrdernessTimestampExtractor
@@ -38,7 +38,8 @@ object NetworkFlow {
     env.setParallelism(1)
     env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
 
-    val dataStream = env.readTextFile("D:\\Projects\\BigData\\UserBehaviorAnalysis\\NetworkFlowAnalysis\\src\\main\\resources\\apache.log")
+//    val dataStream = env.readTextFile("D:\\Projects\\BigData\\UserBehaviorAnalysis\\NetworkFlowAnalysis\\src\\main\\resources\\apache.log")
+    val dataStream = env.socketTextStream("localhost", 7777)
       .map( data => {
         val dataArray = data.split(" ")
         // 定义时间转换
@@ -53,10 +54,13 @@ object NetworkFlow {
       .timeWindow(Time.minutes(10), Time.seconds(5))
       .allowedLateness(Time.seconds(60))
       .aggregate( new CountAgg(), new WindowResult() )
+
+    val processedStream = dataStream
       .keyBy(_.windowEnd)
       .process( new TopNHotUrls(5) )
 
-    dataStream.print()
+    dataStream.print("aggregate")
+    processedStream.print("process")
 
     env.execute("network flow job")
   }
@@ -82,24 +86,25 @@ class WindowResult() extends WindowFunction[Long, UrlViewCount, String, TimeWind
 
 // 自定义排序输出处理函数
 class TopNHotUrls(topSize: Int) extends KeyedProcessFunction[Long, UrlViewCount, String]{
-  lazy val urlState: ListState[UrlViewCount] = getRuntimeContext.getListState( new ListStateDescriptor[UrlViewCount]("url-state", classOf[UrlViewCount]) )
+  lazy val urlState: MapState[String, Long] = getRuntimeContext.getMapState( new MapStateDescriptor[String, Long]("url-state", classOf[String], classOf[Long] ) )
 
   override def processElement(value: UrlViewCount, ctx: KeyedProcessFunction[Long, UrlViewCount, String]#Context, out: Collector[String]): Unit = {
-    urlState.add(value)
+    urlState.put(value.url, value.count)
     ctx.timerService().registerEventTimeTimer(value.windowEnd + 1)
   }
 
   override def onTimer(timestamp: Long, ctx: KeyedProcessFunction[Long, UrlViewCount, String]#OnTimerContext, out: Collector[String]): Unit = {
     // 从状态中拿到数据
-    val allUrlViews: ListBuffer[UrlViewCount] = new ListBuffer[UrlViewCount]()
-    val iter = urlState.get().iterator()
+    val allUrlViews: ListBuffer[(String, Long)] = new ListBuffer[(String, Long)]()
+    val iter = urlState.entries().iterator()
     while(iter.hasNext){
-      allUrlViews += iter.next()
+      val entry = iter.next()
+      allUrlViews += (( entry.getKey, entry.getValue ))
     }
 
-    urlState.clear()
+//    urlState.clear()
 
-    val sortedUrlViews = allUrlViews.sortWith(_.count > _.count).take(topSize)
+    val sortedUrlViews = allUrlViews.sortWith(_._2 > _._2).take(topSize)
 
     // 格式化结果输出
     val result: StringBuilder = new StringBuilder()
@@ -107,8 +112,8 @@ class TopNHotUrls(topSize: Int) extends KeyedProcessFunction[Long, UrlViewCount,
     for( i <- sortedUrlViews.indices ){
       val currentUrlView = sortedUrlViews(i)
       result.append("NO").append(i + 1).append(":")
-        .append(" URL=").append(currentUrlView.url)
-        .append(" 访问量=").append(currentUrlView.count).append("\n")
+        .append(" URL=").append(currentUrlView._1)
+        .append(" 访问量=").append(currentUrlView._2).append("\n")
     }
     result.append("=============================")
     Thread.sleep(1000)
