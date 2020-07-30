@@ -76,7 +76,7 @@ class Bloom(size: Long) extends Serializable {
 
 class UvCountWithBloom() extends ProcessWindowFunction[(String, Long), UvCount, String, TimeWindow]{
   // 定义redis连接
-  lazy val jedis = new Jedis("localhost", 6379)
+  lazy val jedis = new Jedis("hadoop02", 6379)
   lazy val bloom = new Bloom(1<<29)
 
   override def process(key: String, context: Context, elements: Iterable[(String, Long)], out: Collector[UvCount]): Unit = {

@@ -3,6 +3,7 @@ package com.atguigu.networkflow_analysis
 import java.sql.Timestamp
 import java.text.SimpleDateFormat
 
+import com.atguigu.networkflow_analysis.PageView.getClass
 import org.apache.flink.api.common.functions.AggregateFunction
 import org.apache.flink.api.common.state.{ListState, ListStateDescriptor, MapState, MapStateDescriptor}
 import org.apache.flink.streaming.api.TimeCharacteristic
@@ -37,9 +38,10 @@ object NetworkFlow {
     val env = StreamExecutionEnvironment.getExecutionEnvironment
     env.setParallelism(1)
     env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
-
-//    val dataStream = env.readTextFile("D:\\Projects\\BigData\\UserBehaviorAnalysis\\NetworkFlowAnalysis\\src\\main\\resources\\apache.log")
-    val dataStream = env.socketTextStream("localhost", 7777)
+    // 用相对路径定义数据源
+    val resource = getClass.getResource("/apache.log")
+    val dataStream = env.readTextFile(resource.getPath)
+//    val dataStream = env.socketTextStream("localhost", 7777)
       .map( data => {
         val dataArray = data.split(" ")
         // 定义时间转换
